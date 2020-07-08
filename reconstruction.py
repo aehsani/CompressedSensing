@@ -1,8 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
+# import tensorflow as tf
 from scipy.special import entr
-from gurobipy import *
+import gurobipy as gp
 
 class SmoothGreedy:
     def __init__(self, A, k, data, eps = 0.1):
@@ -51,7 +51,7 @@ class SmoothGreedy:
 
     def get_p_quadratic(self, g_vec):
         N = len(g_vec)
-        model = gp.Modle("qp")
+        model = gp.Model("qp")
         m_vars = []
         for i in range(N):
             y = m.addVar(lb=0, up=1, vtype=GRB.CONTINUOUS)
@@ -72,7 +72,9 @@ class SmoothGreedy:
         return p_vec
 
     def get_p_entr(self, g_vec):
-        pass
+        p_vec = np.exp(g_vec/self.eps)
+        p_vec = p_vec/p_vec.sum()
+        return p_vec
                 
     def find_best_x(self, indices):
         indices = sorted(indices)
