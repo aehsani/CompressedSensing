@@ -12,16 +12,17 @@ class SmoothGreedy:
         self.eps = eps
         self.data = data
 
-        self.n = Y.shape[0]
-        self.d = A.shape[0]
-        self.k = min(k, self.d)
+        self.n = Y.shape[1] # number of vectors
+        self.d = A.shape[1] # dimension of vectors
+        self.m = A.shape[0] # dimension of measurements
+        self.k = min(k, self.d) # cardinality constraint
 
-        self.reconstruction = np.zeros((self.n, self.d))
+        self.reconstruction = np.zeros((self.d, self.n))
         self.current_objective_val = 0
         self.compute_reconstruction()
         
 
-    def evaluate(self):
+    def evaluate_old(self):
         if data is None:
             raise ValueError("No data to evaluate error")
         unscaled = np.linalg.norm(self.data - self.reconstruction, ord='fro')
@@ -32,9 +33,9 @@ class SmoothGreedy:
             if i % 50 == 0:
                 print("Doing vector: ", i)
             entries, indices = self.compute_best_indices(i)
-            self.reconstruction[i,indices] = entries
+            self.reconstruction[indices,i] = entries
 
-    def compute_best_indices(self, i):
+    def compute_best_indices_old(self, i):
         current_indices = set()
         remaining = set(range(self.d))
         measurement = Y[i,:]
@@ -60,6 +61,49 @@ class SmoothGreedy:
 
         best_x, _ = self.find_best_x(current_indices, measurement)
         return best_x, sorted(current_indices)
+
+    def compute_best_indices(self, i):
+        current_indices = set()
+        pseudo_inv = np.zeros((self.k,self.m))
+        A_sub = np.zeros((self.m,self.k))
+        remaining = set(range(self.d))
+        measurement = Y[:,i]
+        l0 = 1/2*np.inner(measurement, measurement)
+        current_obj_val = 0
+        best_x = None
+        chosen = []
+
+        for _ in range(self.k):
+            g = dict()
+            objective = dict()
+
+            for j in remaining:
+                new_A_sub, new_pseudo = self.update_matrices(j, chosen, A_sub, pseudo_inv)
+                best_x, loss = self.r1_find_best_x(j, current_indices, measurement, A_sub, psuedo_inv)
+                objective[j] = l0 - loss
+                g[j] = objective[j] - current_obj_val
+
+            best_j = self.choose_index(g)
+            remaining.remove(best_j)
+            current_indices.add(best_j)
+            current_obj_val = objective[best_j]
+
+        best_x, _ = self.find_best_x(current_indices, measurement)
+        return best_x, sorted(current_indices)
+
+    def update_matrices(self, j, chosen, A_sub, pseudo_inv):
+        
+        return new_A_sub, new_pseudo_inv
+
+    def r1_find_best_x(self, j, indices, measurement, A_sub, pseudo_inv):
+        q = len(indices) + 1
+
+        sorted_indices = sorted(indices)
+        pos = sorted_indices.index(j)
+
+        new_A = self.A[indices,:]
+        x_dict = np.linalg.lstsq(new_A.transpose(), measurement.transpose(), rcond=None)
+        return x_dict[0], x_dict[1].sum()/2
 
                 
     def choose_index(self, g):
