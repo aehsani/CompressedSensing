@@ -1,0 +1,161 @@
+\documentclass[11pt]{article}
+
+\usepackage{hyperref}
+\usepackage[margin=1in]{geometry}
+\setlength{\parindent}{0pt}
+\usepackage[parfill]{parskip}
+\usepackage[capitalize, nameinlink]{cleveref}
+\usepackage{todonotes}
+\usepackage{times,amsmath,amssymb,amsfonts,epsfig,graphicx}
+\usepackage{amsthm} 
+\usepackage{dsfont}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+
+\newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\newtheorem{conjecture}{Conjecture}
+\newtheorem{remark}{Remark}
+\newtheorem{example}{Example}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\A}{\mathcal{A}}
+\newcommand{\tF}{\tilde{\mathcal{F}}}
+\newcommand{\EE}{\operatorname{\mathbb{E}}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\supp}{\mathrm{supp}}
+\newcommand{\Greedy}{\mathtt{Greedy}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+
+\newcommand{\forme}[1]{\todo[color=red!30, inline, disable]{ #1}} %
+\newcommand{\mtodo}[1]{\todo[color=blue!30, inline]{ #1}}
+
+\newif \ifprivate 
+\privatetrue
+
+\title{Learning based greedy compressive sensing}
+\author{Marwa El Halabi}
+
+\begin{document}
+\maketitle
+
+Compressive sensing (CS) is the problem of recovering a sparse vector $x \in \R^d$ from a set of dimensionality-reduced measurements of the form $y = A x + \epsilon$, where $A \in \R^{n \times d}$ is a known measurement matrix, and $\epsilon \in \R^n$ is an unknown additive noise. The main two challenges in CS are designing computationally efficient algorithms, and measurement matrix with good properties.
+Several approaches has been proposed for both challenges. In terms of algorithms, recovery guarantees were obtained for convex methods based on $\ell_1$-regularization, as well as greedy methods, under some assumptions on $A$. Several measurement matrix were shown to satisfy these assumptions, including random matrices with i.i.d Gaussian entries.
+
+However, if the vector $x$ is generated from some natural distribution (e.g., natural images), recent works \cite{Baldassarre2016a, Mousavi2015, Metzler2017} show that learning a measurement matrix $A$ from samples of that distribution can improve the recovery error, compared to a random matrix.
+
+\section{Proposed approach}
+We propose a new learning-based approach to choose the measurement matrix. Given a set of $m$ training vectors $x^1, \cdots , x^m$, we seek the measurement matrix that minimize the empirical recovery error, when estimates are computed via a Greedy algorithm:
+\begin{equation}\label{eq:outerPb}
+\min_{A^\top A \succ 0} \frac{1}{m} \sum_{i=1}^m \| x^i - \widehat{x}^i(A)\|_2^2,
+\end{equation}
+where $\widehat{x}^i(A)$ is an estimate of $x^i$ obtained by approximately solving
+\begin{equation}\label{eq:greedyPb}
+ \min_{|S|  \leq k, \supp(x) \subseteq S} \frac{1}{2} \| y^i - A x\|_2^2
+\end{equation}
+ 
+\mtodo{Can we show improved performance compared to random matrix theoretically? We can initialize SGD with a random Gaussian matrix. Can we then at least show that the solution is guaranteed to not degrade?}
+
+The function $F(S) = \ell(0) - \min_{\supp(x) \subseteq S} \ell(x)$ was shown to be weakly submodular  \cite{Elenberg2016} whenever the loss function $\ell$ is smooth and strongly convex over the restricted set of $2k$-sparse vectors. This holds for the least squares loss $\ell(x) = \frac{1}{2} \| y^i - A x\|_2^2$ if any $2k \times 2k$ submatrix of $A^\top A$ is positive definite.
+Hence, Problem \ref{eq:greedyPb} is a monotone weakly submodular maximization problem. We propose to solve it using the smoothed Greedy algorithm proposed in \cite{sakaue2020differentiable}. 
+\begin{algorithm}[H]
+    \caption{Smooth Greedy \label{alg:smoothgreedy}}
+    \begin{algorithmic}[1]
+        \State $S^1 \leftarrow \emptyset$
+        \For{$t = 0, \cdots, k-1$}
+            \State $g^t \leftarrow (F(e_1 \mid S^t), \cdots, F(e_{n}\mid S^t))$
+            \State $p^t = (p^t(e_1), \cdots, p^t(e_{n})) \leftarrow \argmax_{p \in \Delta^{n}} \langle g^t, p \rangle - \Omega(p)$
+            \State $s_t \leftarrow e$ with probability $p^t(e)$
+            \State $S^{t+1} \leftarrow S^t \cup \{s_t\}$
+        \EndFor
+        \State \Return $S^k$
+    \end{algorithmic}
+\end{algorithm}
+
+The solution returned by the smoothed Greedy algorithm is differentiable w.r.t $A$, which allows us to use gradient-based methods to solve Problem \ref{eq:outerPb}. If $F$ is submodular, the solution returned by smoothed Greedy only looses an additive error compare to regular Greedy, i.e., $\EE[F(S)] \geq (1-1/e) OPT - k \delta$ where $\delta$ is a constant such that $\Omega(p) - \Omega(q) \leq \delta$ for all $p, q \in \Delta^n$.
+We can show a similar result if $F$ is $\gamma$-weakly submodular: $\EE[F(S)] \geq (1- e^{-\gamma}) OPT - k \delta$ (see Anis's writeup).
+This is special case  the perturbed maximization method in \cite{Berthet2020}. 
+
+\subsection{Alternative smoothing}
+
+An alternative way to make the output of the $\argmax$ operation in Greedy differentiable is to perturb the simplex constraint instead of the objective. For example, we can use
+\[ \tilde{p}^t = \argmax_{\| p \|_{1+\epsilon}  \leq 1} \langle g^t, p \rangle = (\frac{g^t}{\| g^t\|_q})^{q-1}, \]
+for some small $\epsilon >0$, and $q = 1 + 1/\epsilon$. Note that $g^t$ is non-negative, since $F$ is monotone, hence $\tilde{p}^t \geq 0$. To make $\tilde{p}^t$ into a proper probability vector we need to normalize it, so we set $p^t = \frac{\tilde{p}^t}{\|\tilde{p}^t\|_1}$.\\
+
+\begin{proposition}
+Using this variant of smoothed Greedy yields a solution $S$ satisfying $\EE[F(S)] \geq (1- e^{-\alpha}) OPT$, where $\alpha = n^{-\epsilon/(1+\epsilon)}$.
+\end{proposition}
+\begin{proof}
+We can lower bound the expected marginal gain:
+\begin{align*}
+\EE[F(s_t | S^{t})] =  \langle g^t, p^t \rangle &= \frac{ \|g^t \|_q }{\|\tilde{p}^t\|_1}\\
+&= \|g^t \|_q (\frac{ \|g^t \|_q }{\|g^t \|_{q-1}})^{q-1}\\
+&\geq n^{-1/q}  \|g^t \|_q \\
+&\geq   n^{-1/q}  \|g^t \|_\infty  = \alpha \|g^t \|_\infty. 
+\end{align*}
+The proposition then follows using the same proof of Greedy algorithm for weakly submodular functions \cite{Bian2017a}. 
+\end{proof}
+
+The above approximation can be better than the one achieved by Smooth Greedy using regularization in some cases (e.g., if OPT is larger than $k$).
+
+\subsection{Learning algorithm}
+To ensure that $A^\top A \succ 0$, we can project on the space of positive definite matrices with $\lambda_{\min} \geq \epsilon$ for some hyperparameter $\epsilon>0$ that we can tune. The projection requires doing an eigendecomposition and updating the eigenvalues to the maximum between the eigenvalue and $\epsilon$, i.e., $\lambda_i = \max\{\lambda_i(A^\top A), \epsilon\}$. To make this operation differentiable, we can use the differentiable SVD algorithm from  \cite{Indyk2019}, based on the power method, to compute the SVD decomposition of $A$, then update the singular values of $A$ as follows $\sigma_i = \sqrt{\max\{\lambda_i(A^\top A), \epsilon\}}$ (recall that $\sigma_i(A) = \sqrt{\lambda_i(A^\top A)}$), using a differentiable variant of max function, e.g., log-sum-exp or p-norm with $p \to \infty$.
+
+\paragraph{Algorithm}
+Initialize $A$ be a random Gaussian matrix (or any other measurement matrix known to lead to good recovery results). At each iteration we take a gradient step 
+$$A = \Pi_{PD(\epsilon)}(A -  \frac{2 \eta}{B} \sum_{i=1}^B \nabla_A \EE_{S}[\| \widehat{x}^i(A) - x^i \|_2^2]),$$ where $B$ is the batch size,  $\Pi_{PD(\epsilon)}$ is the projection on the space of positive definite matrices with $\lambda_{\min} \geq \epsilon$, and $\widehat{x}^i(A) = A_S^+ y^i$, where $S$ is the solution obtained by the smoothed Greedy algorithm. 
+
+Let $p(S, A)$ the probability distribution of the output $S$ of smoothed Greedy, and $h^i$ the function such that $\widehat{x}^i(A) = h^i(A, S)$. We need to compute
+\begin{align*}
+\nabla_A \EE_{S}[\| \widehat{x}^i(A) - x^i \|_2^2] &= \sum_{S \subseteq V} (2 \nabla_A h^i(A, S) (h^i(A, S) - x^i) p(S, A) + \| h^i(A, S) - x^i \|_2^2 \nabla_A p(S, A))\\
+&=  \EE_S[2 \nabla_A h^i(A, S) (h^i(A, S)  - x^i) + \| h^i(A, S) - x^i \|_2^2 \nabla_A \ln p(S, A)]
+\end{align*}
+As discussed in \cite{sakaue2020differentiable}, we can compute an unbiased estimate of the Jacobian matrix  by sampling $N$ outputs $S_1, \cdots, S_N$ of smoothed Greedy:
+\begin{align*}
+\frac{1}{N} \sum_{j=1}^N 2 \nabla_A h^i(A, S_j) (h^i(A, S_j)  - x^i) + \| h^i(A, S_j) - x^i \|_2^2 \nabla_A \ln p(S_j, A).
+\end{align*}
+We can compute $\nabla_A \ln p(S, A)$ for a fixed set $S$ as $$\nabla_A \ln p(S, A) = \sum_{t=1}^k \frac{ \nabla_A p^t(s_t, A) }{ p^t(s_t, A) } = \sum_{t=1}^k \frac{ \nabla_{g^t} p^t(s_t, A) \nabla_A g^t(A)}{ p^t(s_t, A) }.$$
+For an appropriate choice of $\Omega$, e.g., the entropy function or quadratic function, $p^t(s_t, A)$ is differentiable w.r.t $g^t$.  Moreover, $$\nabla_A [g^t(A)]_j = \nabla_A h^i(A, S^t ) \nabla_A \ell(h^i(A, S^t)) - \nabla_A h^i(A, S^t \cup e_j) \nabla_A \ell(h^i(A, S^t \cup e_j)).$$
+We can also compute $\nabla_A h^i(A, S)$ for a fixed set $S$, since the pseudoinverse of a matrix is differentiable w.r.t to the matrix (see derivative formula in \url{https://math.stackexchange.com/questions/2179160/derivative-of-pseudoinverse-with-respect-to-original-matrix}). 
+\mtodo{If backpropagating through the pseudo-inverse the difficult to do in practice as claimed in \cite{Wu2019}, we can try to do something similar to Lemma 1 of  \cite{Wu2019}.}
+
+We can also use a variance reduction method as described in \cite{sakaue2020differentiable} to reduce the variance of the gradient estimates.
+\section{Related work}
+%Learning-based approach to algorithm design has recently received a lot of attention.
+%Beyond CS, such approaches has been developed for low rank approximation (Indyk's work), and other classical algorithms (examples?).
+Existing learning-based approaches in CS focus on either learning a good measurement matrix from data as in  \cite{Baldassarre2016a, Goezcue2018, Wu2019}, or on learning a good recovery/decoding algorithm as in \cite{Metzler2017}, or both as in \cite{Mousavi2015}.
+We focus on learning a good measurement matrix. Our approach can be viewed as using an autoencoder with a linear encorder and a greedy decoder.  
+
+The closest work to ours is \cite{Wu2019}, who propose to learn a general measurement matrix from data using an autoencoder with a linear encoder, and instead of the greedy algorithm, they use $\ell_1$-minimization algorithm as a decoder. They only consider the non-noisy setting, and the case where the vectors are non-negative. To compute the gradient of the objective function in  Problem \ref{eq:outerPb} they unroll the $\ell_1$-minimization, by using a $T$ step projected gradient descent updates of it. 
+
+ \cite{Baldassarre2016a} used a similar formulation to Problem \ref{eq:outerPb}, but they restrict $A$ to be of the form $A = P_\Omega \Phi$, where $\Phi \in \mathbb{C}^{d \times d}$ is an orthonormal basis matrix, and $P_\Omega$ is a subsampling operator that selects the rows indexed by $\Omega$, and use a simple linear decoder to compute the estimates $\widehat{x}^i(A)$. \cite{Goezcue2018} generalizes this to non-linear decoders, and use the greedy algorithm to approximately solve the outer problem (not the innner problem as we're proposing). They do not provide theoretical guarantees on the quality of solutions obtained.
+ \forme{They do provide a bound on the difference between the empirical average performance and expected performance in terms of the size of the set $\A$ of feasible measurements $\Omega \in \A$. This is obtained by simply applying Hoeffding’s inequality + union bound. Can we generalize this to our setup where $A$ is a general measurement matrix (but in our case the size of the domain is infinite)? can we also provide guarantees to when the empirical error is only approximately minimized?}
+ 
+ The following papers have a different focus from us, as they focus on learning a good recovery/decoding algorithm, as well as a measurement matrix in some cases.
+ \mtodo{So it's less important to compare empirically with them}
+\cite{Mousavi2015} use a denoising autoencoder to learn a structured representation from training data, and to compute signal estimates. This approach does not use any hand-designed model/algorithm, just rely on data. They consider both linear and mildly nonlinear measurements. 
+ \cite{Metzler2017} propose a neural network that unrolls a sparse-recovery algorithm; the denoising-based approximate message passing algorithm. The network does not learn the measurement matrix though. %The downside of these approaches is that no theoretical guarantees are provided for their performance.
+
+See Section 2 in \cite{Wu2019} for an overview of other related work.
+
+\forme{There's other works on autoencoders for CS I think. See for example work by Alex Dimakis. In the papers by Baraniuk there's reference to other DL papers that do learn the measurement matrix and unroll some known recovery algorithm. }
+\forme{Are we actually gonna be able to give theoretical guarantees for our approach, beyond the approximation guarantee for greedy?}
+
+\forme{Can we generalize this to generalized linear models?}
+
+\section{Experiments}
+\mtodo{We need to compare our approach to the approaches of \cite{Wu2019} and \cite{Goezcue2018} at least.}
+
+To compute the Jacobean of the probability vector when Omega is the quadratic function we can use the code from \cite{amos2017optnet}.
+We can use a variance reduction method like the baseline correction method used in  \cite{sakaue2020differentiable}.
+Once we learn a measurement matrix we can use the standard Greedy algorithm to recover test signals.
+\bibliographystyle{plain}
+\bibliography{/Users/Marwa/Desktop/Research/biblio_master}
+\end{document}
+
