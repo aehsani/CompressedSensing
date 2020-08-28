@@ -30,8 +30,8 @@ class SmoothGreedy:
     
     def compute_reconstruction(self):
         for i in range(self.n):
-            if i % 50 == 0:
-                print("Doing vector: ", i)
+            #if i % 50 == 0:
+            #    print("Doing vector: ", i)
             entries, indices = self.compute_best_indices(i)
             self.reconstruction[indices,i] = entries
 
@@ -72,6 +72,7 @@ class SmoothGreedy:
         current_obj_val = 0
         best_x = None
         chosen = []
+        g_list = []
 
         for _ in range(self.k):
             g = dict()
@@ -79,10 +80,11 @@ class SmoothGreedy:
 
             for j in remaining:
                 new_A_sub, new_pseudo = self.update_matrices(j, chosen, A_sub, pseudo_inv)
-                best_x, loss = self.r1_find_best_x(j, current_indices, measurement, A_sub, psuedo_inv)
+                best_x, loss = self.r1_find_best_x(measurement, new_A_sub, new_pseudo)
                 objective[j] = l0 - loss
                 g[j] = objective[j] - current_obj_val
 
+            g_list.append(g)
             best_j = self.choose_index(g)
             remaining.remove(best_j)
             current_indices.add(best_j)
@@ -92,18 +94,65 @@ class SmoothGreedy:
         return best_x, sorted(current_indices)
 
     def update_matrices(self, j, chosen, A_sub, pseudo_inv):
+        # i is next index to be filled in A_sub
+        # j is the index chosen from the parent iteration algorithm
+        i = len(chosen)
+        new_A_sub = A_sub.copy()
+        new_pseudo_inv = pseudo_inv.copy()
+        # TODO change this later to make this faster
+        new_A_sub[:, i] = self.A[:, j]
         
-        return new_A_sub, new_pseudo_inv
+        c = self.A[:j]
+        d = np.zeros((1,k))
+        d[0,i] = 1
+        w = (np.identity(self.m) - A_sub @ pseudo_inv) @ c
+        m = (np.identity(self.k) - pseudo_inv @ A_sub).T @ d
 
-    def r1_find_best_x(self, j, indices, measurement, A_sub, pseudo_inv):
-        q = len(indices) + 1
+        v = pseudo_inv @ c
+        beta = (d.T @ pseudo_inv @ c)[0,0] + 1
+        n = pseudo_inv.T @ d
 
-        sorted_indices = sorted(indices)
-        pos = sorted_indices.index(j)
+        w_sq = np.linalg.norm(w, 2)**2
+        m_sq = np.linalg.norm(m, 2)**2
+        v_sq = np.linalg.norm(v, 2)**2
+        n_sq = np.linalg.norm(n, 2)**2
 
-        new_A = self.A[indices,:]
-        x_dict = np.linalg.lstsq(new_A.transpose(), measurement.transpose(), rcond=None)
-        return x_dict[0], x_dict[1].sum()/2
+        threshold = 10e-8
+        if w_sq > threshold and m_sq > threshold:
+            G = -v @ w.T/w_sq**2 - m @ n.T/m_sq + m @ w.T/(w_sq*m_sq)*beta
+
+        elif w_sq <= threshold and m_sq > threshold and abs(beta) < threshold:
+            G = -v @ v.T @ pseudo_inv / v_sq - m @ n.T/m_sq
+
+        elif w_sq < threshold and abs(beta) > threshold:
+            t1 = v_sq/beta * m  + v
+            t2 = pseudo_inv.T @ v * m_sq/beta + n
+            coeff = beta/(v_sq*m_sq + beta**2)
+            G = m @ v.T @ pseudo_inv/beta - coeff * t1 @ t2.T
+
+        elif w_sq > threshold and m < threshold and abs(beta) < threshold:
+            G = -pseudo_inv @ n @ n.T/n_sq - v @ w.T/w_sq
+
+        elif m_sq < threshold and abs(beta) > threshold:
+            t1 = pseudo_inv @ n * w_sq/beta + v
+            t2 = w*n_sq/beta + n
+            coeff = beta/(n_sq*w_sq + beta**2)
+            G = pseudo_inv @ n @ w.T /beta - coeff * t1 @ t2.T
+
+        elif w_sq < threshold and m_sq < threshold and abs(beta) < threshold:
+            t1 = - v @ v.T @ pseudo_inv / v_sq
+            t2 = - pseudo_inv @ n @ n.T / n_sq
+            t3 = v.T @ pseudo_inv @ n @ v @ n.T / (v_sq * n_sq)
+            G = t1 + t2 + t3
+        else:
+            raise ValueError("Conditions on matrices lead to an invalid pseudoinverse")
+        
+        return new_A_sub, new_pseudo_inv + G
+
+    def r1_find_best_x(self, measurement, A_sub, pseudo_inv):
+        x = pseudo_inv @ measurement
+        resid = np.sum(np.square(measurement - A_sub @ x))/2
+        return x, resid
 
                 
     def choose_index(self, g):
